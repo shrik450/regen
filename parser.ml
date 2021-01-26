@@ -3,7 +3,7 @@ type expr =
   | Dot
   | Character of char
   (* The usage of expr lists here isn't strictly necessary, and they can be 
-   * replaces with expr * expr instead. However, using expr lists here makes 
+   * replaced with expr * expr instead. However, using expr lists here makes 
    * generation convenient later on by letting us use List module methods such
    * as List.length, List.nth and List.rev_map. *)
   | Or of expr list
