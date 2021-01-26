@@ -2,9 +2,12 @@ type expr =
   | Empty
   | Dot
   | Character of char
-  | CharRange of char * char
-  | Or of expr * expr
-  | And of expr * expr
+  (* The usage of expr lists here isn't strictly necessary, and they can be 
+   * replaces with expr * expr instead. However, using expr lists here makes 
+   * generation convenient later on by letting us use List module methods such
+   * as List.length, List.nth and List.rev_map. *)
+  | Or of expr list
+  | And of expr list
   | BoundedRange of expr * int * int
   | UnboundedRange of expr * int
 
@@ -17,57 +20,103 @@ type parser_state =
 | State5 (* Passed - in class, looking for final char in range. *)
 (* More states to come: {} Quantifier definition. *)
 
-let parse (inp:string) : expr =
-  let rec _parse inp n state expr =
-    let length = String.length inp in
-    if n = length then expr
+let unexpected_error =
+  Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
+
+let out_of_range_error =
+  Printf.sprintf "Parse failure: Characters out of range at col %d."
+
+let rec _parse inp n state expr =
+  let len = String.length inp in
+  if len = n then expr
+  else begin
+    match state with
+    | State1 -> _parse_state_1 inp n expr
+    | State2 -> _parse_state_2 inp n expr
+    | State3 -> _parse_state_3 inp n expr
+    | State4 -> _parse_state_4 inp n expr
+    | State5 -> _parse_state_5 inp n expr
+  end
+
+and _parse_state_1 inp n = function
+  | And lst -> begin
+    let current_char = inp.[n] in
+    match current_char with
+    | '.' -> _parse inp (n + 1) State2 (And (Dot::lst))
+    | '[' -> _parse inp (n + 1) State3 (And ((Or [])::lst))
+    | a   -> _parse inp (n + 1) State2 (And ((Character a)::lst))
+  end
+  | _ -> failwith "internal failure in state 1."
+
+and _parse_state_2 inp n expr =
+  match expr with
+  | And (h::t) -> begin
+    let current_char = inp.[n] in
+    match current_char with
+    | '?' -> begin
+      let new_h = BoundedRange (h, 0, 1) in
+      _parse inp (n + 1) State1 (And (new_h::t))
+    end
+    | '*' -> begin
+      let new_h = UnboundedRange (h, 0) in
+      _parse inp (n + 1) State1 (And (new_h::t))
+    end
+    | '+' -> begin
+      let new_h = UnboundedRange (h, 1) in
+      _parse inp (n + 1) State1 (And (new_h::t))
+    end
+    | _   -> _parse inp n State1 expr
+  end
+  | _ -> failwith "internal failure in state 2."
+
+and _parse_state_3 inp n expr =
+  match expr with
+  | And (h::t) -> begin
+    let current_char = inp.[n] in
+    match current_char with
+    (* Regex engines aren't consistent across how a leading - is treated. 
+     * In some implementations it is assumed to be a literal, while in others
+     * it creates a range that doesn't match anything. To make our handling of
+     * this simple, we'll simply raise an error. *)
+    | '-' -> failwith @@ unexpected_error current_char (n + 1)
+    | ']' -> _parse inp (n + 1) State1 expr
+    | a   -> begin
+      match h with
+      | Or lst -> begin
+        let new_h = Or ((Character a)::lst) in
+        _parse inp (n + 1) State4 (And (new_h::t))
+      end
+      | _ -> failwith "internal failure in state 3: no OR list."
+    end
+  end
+  | _ -> failwith "internal failure in state 3: no AND list."
+
+and _parse_state_4 inp n expr =
+  let current_char = inp.[n] in
+  match current_char with
+  | '-' -> _parse inp (n + 1) State5 expr
+  | _   -> _parse inp n State3 expr
+
+and _parse_state_5 inp n expr =
+  match expr with
+  | And (((Or ((Character c)::tl1)))::tl2) -> begin
+    let current_char = inp.[n] in
+    let init = int_of_char c in
+    let diff =  (int_of_char current_char) - init in
+    if diff <= 0
+    then failwith @@ out_of_range_error (n + 1)
     else begin
-      let current_char = inp.[n] in
-      let transition = _parse inp (n + 1) in
-      let remain = _parse inp n in
-      match state with
-      | State1 -> begin
-        match current_char with
-        | '.' -> transition State2 (And (Dot, expr))
-        | '[' -> transition State3 (And (Empty, expr))
-        | a -> transition State2 (And (Character a, expr))
-      end
-      | State2 -> begin
-        match expr with
-        | And (recent_expr, prev_expr) -> begin
-          match current_char with
-          | '?' -> transition State1 (And (BoundedRange (recent_expr, 0, 1), prev_expr))
-          | '*' -> transition State1 (And (UnboundedRange (recent_expr, 0), prev_expr))
-          | '+' -> transition State1 (And (UnboundedRange (recent_expr, 1), prev_expr))
-          | _ -> remain State1 expr
-        end
-        | _ -> failwith "internal error in State 2"
-      end
-      | State3 -> begin
-        match expr with
-        | And (current_expr, prev_expr) -> begin
-          match current_char with
-          | '-' -> failwith "Parse failure: Unexpected `-'."
-          | ']' -> transition State1 expr
-          | a -> transition State4 (And (Or (Character a, current_expr), prev_expr))
-        end
-        | _ -> failwith "internal error in State 3"
-      end
-      | State4 -> begin
-        match expr with
-        | And (Or (recent_expr1, recent_expr2), prev_expr) -> begin
-          match current_char with
-          | '-' -> transition State5 expr
-          | _ -> remain State3 expr
-        end
-        | _ -> failwith "internal error in State 4"
-      end
-      | State5 -> begin
-        match expr with 
-        | And (Or (Character c, recent_expr2), prev_expr) -> begin
-          transition State3 (And (Or (CharRange (c, current_char), recent_expr2), prev_expr))
-        end
-        | _ -> failwith "internal error in State 5"
-      end
-    end in
-  _parse inp 0 State1 Empty
+      
+      let rec add_chars init n lst = 
+        (* Don't forget to keep the current character! *)
+        if n = -1 then lst
+        else add_chars init (n - 1) @@ (Character (char_of_int (init + n)))::lst in
+
+      let new_h = Or (add_chars init diff tl1) in
+        _parse inp (n + 1) State3 (And (new_h::tl2)) 
+    end
+  end
+  | _ -> failwith "internal error in state 5."
+
+let parse (inp:string) : expr =
+  _parse inp 0 State1 (And [])

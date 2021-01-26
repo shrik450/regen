@@ -1,10 +1,9 @@
 type expr =
-    Empty
+  | Empty
   | Dot
   | Character of char
-  | CharRange of char * char
-  | Or of expr * expr
-  | And of expr * expr
+  | Or of expr list
+  | And of expr list
   | BoundedRange of expr * int * int
   | UnboundedRange of expr * int
 
