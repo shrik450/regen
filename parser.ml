@@ -34,7 +34,13 @@ let out_of_range_error =
 
 let rec _parse inp n state expr =
   let len = String.length inp in
-  if len = n then expr
+  if len = n then begin
+    match state with
+    (* While State2 is expecting a quantifier, a lack of a quantifier never
+     * hurt anyone. *)
+    | State1 | State2 -> expr
+    | State3 | State4 | State5 -> failwith "Unexpected EOF, expecting `]'."
+  end
   else begin
     match state with
     | State1 -> _parse_state_1 inp n expr
@@ -48,6 +54,7 @@ and _parse_state_1 inp n = function
   | And lst -> begin
     let current_char = inp.[n] in
     match current_char with
+    | '*' | '+' | '?' -> failwith @@ unexpected_error current_char (n + 1)
     | '.' -> _parse inp (n + 1) State2 (And (Dot::lst))
     | '[' -> _parse inp (n + 1) State3 (And ((Or [])::lst))
     | a   -> _parse inp (n + 1) State2 (And ((Character a)::lst))
@@ -107,26 +114,32 @@ and _parse_state_5 inp n expr =
   match expr with
   | And (((Or ((Character c)::tl1)))::tl2) -> begin
     let current_char = inp.[n] in
-    let init = int_of_char c in
-    let diff =  (int_of_char current_char) - init in
-    if diff <= 0
-    then failwith @@ out_of_range_error (n + 1)
-    else begin
-      
-      let rec add_chars init n lst = 
-        (* Don't forget to keep the current character! *)
-        if n = -1 then lst
-        else add_chars init (n - 1) @@ (Character (char_of_int (init + n)))::lst in
+    match current_char with
+    (* As was the case with a leading -, a trailing - also seems to be a bit
+     * weird. Again, we'll just raise an error instead. *)
+    | ']' -> failwith @@ unexpected_error ']' (n + 1)
+    | a   -> begin
+      let init = int_of_char c in
+      let diff =  (int_of_char a) - init in
+      if diff <= 0
+      then failwith @@ out_of_range_error (n + 1)
+      else begin
+        
+        let rec add_chars init n lst = 
+          (* Don't forget to keep the current character! *)
+          if n = -1 then lst
+          else add_chars init (n - 1) @@ (Character (char_of_int (init + n)))::lst in
 
-      (* Note that [add_chars] adds characters in "forward" order - i.e., a-c is
-       * added as [Character a; Character b; Character c]. This is important 
-       * because in all other cases, we add them in reverse order as we 
-       * progress through the input string. How the expressions are ordereed
-       * matters in an And list, since we need to output a string that matches 
-       * the ordering of the input regex. However, in this case it doesn't make
-       * a difference, since the output is an Or expression. *)
-      let new_h = Or (add_chars init diff tl1) in
-        _parse inp (n + 1) State3 (And (new_h::tl2)) 
+        (* Note that [add_chars] adds characters in "forward" order - i.e., a-c is
+        * added as [Character a; Character b; Character c]. This is important 
+        * because in all other cases, we add them in reverse order as we 
+        * progress through the input string. How the expressions are ordereed
+        * matters in an And list, since we need to output a string that matches 
+        * the ordering of the input regex. However, in this case it doesn't make
+        * a difference, since the output is an Or expression. *)
+        let new_h = Or (add_chars init diff tl1) in
+          _parse inp (n + 1) State3 (And (new_h::tl2)) 
+      end
     end
   end
   | _ -> failwith "internal error in state 5."
