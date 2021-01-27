@@ -32,7 +32,10 @@ let unexpected_error =
   Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
 
 let out_of_range_error =
-  Printf.sprintf "Parse failure: Characters out of range at col %d."
+  Printf.sprintf "Parse failure: Invalid range at col %d."
+
+let numlen n =
+  n |> string_of_int |> String.length
 
 let rec _parse inp n state expr =
   let len = String.length inp in
@@ -101,7 +104,7 @@ and _parse_state_3 inp n expr =
      * it creates a range that doesn't match anything. To make our handling of
      * this simple, we'll simply raise an error. *)
     | '-' -> failwith @@ unexpected_error current_char (n + 1)
-    | ']' -> _parse inp (n + 1) State1 expr
+    | ']' -> _parse inp (n + 1) State2 expr
     | a   -> begin
       match h with
       | Or lst -> begin
@@ -162,9 +165,9 @@ and _parse_state_6 inp n expr =
       let quant = (int_of_char current_char) - 48 (* 48 is ascii for 0. *) in
       let new_h = 
         match hd with
-        | Multiple (expr, prev_quant) -> begin
+        | Multiple (mexpr, prev_quant) -> begin
           let new_quant = prev_quant * 10 + quant in
-          Multiple (expr, new_quant)
+          Multiple (mexpr, new_quant)
         end
         | _ -> begin
           Multiple (hd, quant)
@@ -180,14 +183,21 @@ and _parse_state_6 inp n expr =
       | _ -> _parse inp (n - 1) State1 expr
     end
 
+    | ',' -> begin
+      match hd with
+      | Multiple (_, _) -> _parse inp (n + 1) State7 expr
+      (* Leading ',', has to be treated as a literal. *)
+      | _ -> _parse inp (n - 1) State1 expr
+    end
+
     | _ -> begin
       match hd with
-      | Multiple (hd_expr, quant) -> begin
+      | Multiple (mexpr, quant) -> begin
         (* We've run into a non-digit while parsing a quantifier.
          * This means the {} are literals, so we need to go back to the position
          * of the { in State1 so it can be processed as such. *)
-        let num_chars = quant |> string_of_int |> String.length in
-        _parse inp (n - num_chars - 1) State1 (And (hd_expr::tl))
+        let num_chars = numlen quant  in
+        _parse inp (n - num_chars - 1) State1 (And (mexpr::tl))
       end
       | _ -> _parse inp (n - 1) State1 expr
     end
@@ -196,7 +206,52 @@ and _parse_state_6 inp n expr =
   | _ -> failwith "internal error in state 6."
 
 and _parse_state_7 inp n expr =
-  Dot
+  match expr with
+  | And (hd::tl) -> begin
+    let current_char = inp.[n] in
+    match current_char with
+    | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' ->  begin
+      let quant = (int_of_char current_char) - 48 in
+      let new_h =
+        match hd with
+        | Multiple (mexpr, start_quant) -> BoundedRange(mexpr, start_quant, quant)
+        | BoundedRange (brexpr, start_quant, prev_end_quant) -> begin
+          let new_end_quant = prev_end_quant * 10 + quant in
+          BoundedRange (brexpr, start_quant, new_end_quant)
+        end
+        | _ -> failwith "internal error in state 7: no BoundedRange." in
+      _parse inp (n + 1) State7 (And (new_h::tl))
+    end
+
+    | '}' -> begin
+      match hd with
+      | Multiple (mexpr, start_quant) -> begin
+        let new_h = UnboundedRange (mexpr, start_quant) in
+        _parse inp (n + 1) State1 (And (new_h::tl))
+      end
+      | BoundedRange (_, start_quant, end_quant) -> begin
+        if start_quant <= end_quant then _parse inp (n + 1) State1 expr
+        else failwith @@ out_of_range_error (n + 1)
+      end
+      | _ -> failwith "internal error in state 7: no BoundedRange"
+    end
+
+    | _ -> begin
+      match hd with
+      (* We can't reuse the State6 parsing because there's an additional comma. *)
+      | Multiple (mexpr, quant) -> begin
+        let num_chars = numlen quant in
+        _parse inp (n - num_chars - 2) State1 (And (mexpr::tl))
+      end
+      | BoundedRange (brexpr, start_quant, end_quant) -> begin
+        let start_chars = numlen start_quant in
+        let end_chars = numlen end_quant in
+        _parse inp (n - start_chars - end_chars - 2) State1 (And (brexpr::tl))
+      end
+      | _ -> failwith "internal error in state 7: no BoundedRange."
+    end 
+  end
+  | _ -> failwith "internal error in state 7: no And list."
 
 let parse (inp:string) : expr =
   _parse inp 0 State1 (And [])
