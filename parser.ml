@@ -14,6 +14,7 @@ type expr =
    * fine, since if a user goes out of their way to specify characters multiple
    * times in a class, I think they should get a higher chance of getting it. *)
   | And of expr list
+  | Multiple of expr * int
   | BoundedRange of expr * int * int
   | UnboundedRange of expr * int
 
@@ -24,7 +25,8 @@ type parser_state =
 | State3 (* Opened character class. *)
 | State4 (* Looking for - in class. *)
 | State5 (* Passed - in class, looking for final char in range. *)
-(* More states to come: {} Quantifier definition. *)
+| State6 (* Passed { as a quantifier def start. *)
+| State7 (* Passed , in a quantifier def. *)
 
 let unexpected_error =
   Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
@@ -40,14 +42,20 @@ let rec _parse inp n state expr =
      * hurt anyone. *)
     | State1 | State2 -> expr
     | State3 | State4 | State5 -> failwith "Unexpected EOF, expecting `]'."
+    (* TODO - implement conversion to literal if this happens. *)
+    | State6 | State7 -> failwith "Unexpected EOF, expecting `}'."
   end
   else begin
-    match state with
-    | State1 -> _parse_state_1 inp n expr
-    | State2 -> _parse_state_2 inp n expr
-    | State3 -> _parse_state_3 inp n expr
-    | State4 -> _parse_state_4 inp n expr
-    | State5 -> _parse_state_5 inp n expr
+    let func = 
+      match state with
+      | State1 -> _parse_state_1
+      | State2 -> _parse_state_2
+      | State3 -> _parse_state_3
+      | State4 -> _parse_state_4
+      | State5 -> _parse_state_5
+      | State6 -> _parse_state_6 
+      | State7 -> _parse_state_7 in
+    func inp n expr
   end
 
 and _parse_state_1 inp n = function
@@ -78,6 +86,7 @@ and _parse_state_2 inp n expr =
       let new_h = UnboundedRange (h, 1) in
       _parse inp (n + 1) State1 (And (new_h::t))
     end
+    | '{' -> _parse inp (n + 1) State6 expr
     | _   -> _parse inp n State1 expr
   end
   | _ -> failwith "internal failure in state 2."
@@ -131,18 +140,63 @@ and _parse_state_5 inp n expr =
           else add_chars init (n - 1) @@ (Character (char_of_int (init + n)))::lst in
 
         (* Note that [add_chars] adds characters in "forward" order - i.e., a-c is
-        * added as [Character a; Character b; Character c]. This is important 
-        * because in all other cases, we add them in reverse order as we 
-        * progress through the input string. How the expressions are ordereed
-        * matters in an And list, since we need to output a string that matches 
-        * the ordering of the input regex. However, in this case it doesn't make
-        * a difference, since the output is an Or expression. *)
+         * added as [Character a; Character b; Character c]. This is important 
+         * because in all other cases, we add them in reverse order as we 
+         * progress through the input string. How the expressions are ordereed
+         * matters in an And list, since we need to output a string that matches 
+         * the ordering of the input regex. However, in this case it doesn't make
+         * a difference, since the output is an Or expression. *)
         let new_h = Or (add_chars init diff tl1) in
           _parse inp (n + 1) State3 (And (new_h::tl2)) 
       end
     end
   end
   | _ -> failwith "internal error in state 5."
+
+and _parse_state_6 inp n expr =
+  match expr with
+  | And (hd::tl) -> begin
+    let current_char = inp.[n] in
+    match current_char with
+    | '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '0' -> begin
+      let quant = (int_of_char current_char) - 48 (* 48 is ascii for 0. *) in
+      let new_h = 
+        match hd with
+        | Multiple (expr, prev_quant) -> begin
+          let new_quant = prev_quant * 10 + quant in
+          Multiple (expr, new_quant)
+        end
+        | _ -> begin
+          Multiple (hd, quant)
+        end in
+      _parse inp (n + 1) State6 (And (new_h::tl))
+    end
+
+    | '}' -> begin
+      match hd with
+      | Multiple (_, _) -> _parse inp (n + 1) State1 expr
+      (* There is no quantifier, so the previous { has to be treated as a 
+       * literal. *)
+      | _ -> _parse inp (n - 1) State1 expr
+    end
+
+    | _ -> begin
+      match hd with
+      | Multiple (hd_expr, quant) -> begin
+        (* We've run into a non-digit while parsing a quantifier.
+         * This means the {} are literals, so we need to go back to the position
+         * of the { in State1 so it can be processed as such. *)
+        let num_chars = quant |> string_of_int |> String.length in
+        _parse inp (n - num_chars - 1) State1 (And (hd_expr::tl))
+      end
+      | _ -> _parse inp (n - 1) State1 expr
+    end
+
+  end
+  | _ -> failwith "internal error in state 6."
+
+and _parse_state_7 inp n expr =
+  Dot
 
 let parse (inp:string) : expr =
   _parse inp 0 State1 (And [])
