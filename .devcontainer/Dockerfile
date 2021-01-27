@@ -8,4 +8,4 @@ RUN echo "source ~/.profile" >> ~/.zshrc
 RUN source ~/.zshrc
 # Installing utop will also install ocamlbuild. For this small project,
 # ocamlbuild should be enough.
-RUN opam install --yes utop ounit ocaml-lsp-server
+RUN opam install --yes utop ounit ocaml-lsp-server ocamlformat
