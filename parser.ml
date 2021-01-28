@@ -20,13 +20,20 @@ type expr =
 
 (* Internal representation of the parser state. *)
 type parser_state =
-  | State1 (* Base State. *)
-  | State2 (* Looking for quantifier. *)
-  | State3 (* Opened character class. *)
-  | State4 (* Looking for - in class. *)
-  | State5 (* Passed - in class, looking for final char in range. *)
-  | State6 (* Passed { as a quantifier def start. *)
-  | State7 (* Passed , in a quantifier def. *)
+  (* Base State. *)
+  | State1
+  (* Looking for quantifier. *)
+  | State2
+  (* Opened character class. *)
+  | State3
+  (* Looking for - in class. *)
+  | State4
+  (* Passed - in class, looking for final char in range. *)
+  | State5
+  (* Passed { as a quantifier def start. *)
+  | State6
+  (* Passed , in a quantifier def. *)
+  | State7
 
 let unexpected_error = Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
 
@@ -91,12 +98,8 @@ and _parse_state_3 inp n expr =
   | And (h :: t) -> (
       let current_char = inp.[n] in
       match current_char with
-      (* Regex engines aren't consistent across how a leading - is treated. 
-       * In some implementations it is assumed to be a literal, while in others
-       * it creates a range that doesn't match anything. To make our handling of
-       * this simple, we'll simply raise an error. *)
-      | '-' -> failwith @@ unexpected_error current_char (n + 1)
       | ']' -> _parse inp (n + 1) State2 expr
+      (* A leading - is also treated as a literal. *)
       | a -> (
           match h with
           | Or lst ->
