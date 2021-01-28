@@ -38,13 +38,11 @@ and generate_multiple (Multiple (expr, quant)) =
   expr |> _gen quant [] |> String.concat ""
 
 and generate_bounded_range (BoundedRange (expr, start_quant, end_quant)) =
-  let quant = start_quant + Random.int (end_quant + 1) in
+  let quant = start_quant + Random.int end_quant in
   generate_expr (Multiple (expr, quant))
 
 and generate_unbounded_range (UnboundedRange (expr, start_quant)) =
   (* For practical reasons, I'm limiting unbounded ranges to 255 characters. *)
   generate_expr (BoundedRange (expr, start_quant, 255))
 
-
-let generate str =
-  str |> Parser.parse |> generate_expr
+let generate str = str |> Parser.parse |> generate_expr
