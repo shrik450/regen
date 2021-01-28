@@ -26,9 +26,7 @@ type parser_state =
   | State4 (* Looking for - in class. *)
   | State5 (* Passed - in class, looking for final char in range. *)
   | State6 (* Passed { as a quantifier def start. *)
-  | State7
-
-(* Passed , in a quantifier def. *)
+  | State7 (* Passed , in a quantifier def. *)
 
 let unexpected_error = Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
 
