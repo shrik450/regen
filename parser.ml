@@ -35,6 +35,14 @@ type parser_state =
   (* Passed , in a quantifier def. *)
   | State7
 
+type governor_state =
+  (* Base State; posting to the base And list. *)
+  | GState1
+  (* State when dealing with |, posting to the head Or list. *)
+  | GState2
+  (* State for dealing with subexpressions, posting to the head And list. *)
+  | GState3
+
 let unexpected_error = Printf.sprintf "Parse failure: Unexpected `%c' at col %d"
 
 let out_of_range_error =
@@ -245,15 +253,44 @@ and _parse_state_7 inp n expr =
         failwith "internal error in state 7: no BoundedRange."
   )
 
-let rec _parse inp n expr =
+let rec _parse inp n state expr =
   let len = String.length inp in
   if n >= len then expr
-  else (
-    match expr with
-    | And lst ->
-      let next_expr, next_n = _parse_one_expr inp n State1 Empty in
-      _parse inp next_n (And (next_expr::lst))
-    | _ -> failwith "internal failure in governor: no AND list."
-  )
+  else
+    let current_char = inp.[n] in
+    match state with
+    | GState1 -> (
+      match expr with
+      | And lst -> (
+        match current_char with
+        | '|' ->
+            _parse inp (n + 1) GState2 expr
+        | _ ->
+            let next_expr, next_n = _parse_one_expr inp n State1 Empty in
+            _parse inp next_n GState1 (And (next_expr :: lst))
+      )
+      | _ ->
+          failwith "internal error in GState1: no AND list."
+    )
+    | GState2 -> (
+      match current_char with
+      | '|' ->
+          failwith @@ unexpected_error '|' (n + 1)
+      | _ -> (
+        match expr with
+        | And (h :: t) -> (
+          match h with
+          | Or lst ->
+              let next_expr, next_n = _parse_one_expr inp n State1 Empty in
+              _parse inp next_n GState1 (And (Or (next_expr :: lst) :: t))
+          | _ ->
+              _parse inp n GState2 (And (Or [h] :: t))
+        )
+        | _ ->
+            failwith "internal error in GState2: no AND list"
+      )
+    )
+    | _ ->
+        failwith "Not implemented."
 
-let parse (inp : string) : expr = _parse inp 0 (And [])
+let parse (inp : string) : expr = _parse inp 0 GState1 (And [])
