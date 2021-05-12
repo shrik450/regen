@@ -1,22 +1,4 @@
-type expr =
-  | Empty
-  | Dot
-  | Character of char
-  (* The usage of expr lists here isn't strictly necessary, and they can be
-   * replaced with expr * expr instead. However, using expr lists here makes
-   * generation convenient later on by letting us use List module methods such
-   * as List.length, List.nth and List.rev_map. *)
-  | Or of expr list
-  (* Also, Or lists should more appropriately be sets of expressions. Consider
-   * The class [[ca-z]]. In this case, the expression [Character c] would
-   * appear twice in the output AST, but it shouldn't be any more likely than
-   * the other characters in some viewpoints. However, I think using a list is
-   * fine, since if a user goes out of their way to specify characters multiple
-   * times in a class, I think they should get a higher chance of getting it. *)
-  | And of expr list
-  | Multiple of expr * int
-  | BoundedRange of expr * int * int
-  | UnboundedRange of expr * int
+open Ast
 
 (* Internal representation of the parser state. *)
 type parser_state =
@@ -154,13 +136,13 @@ and _parse_state_5 inp n expr =
               if n = -1 then lst
               else
                 add_chars init (n - 1)
-                @@ (Character (char_of_int (init + n)) :: lst)
+                @@ Character (char_of_int (init + n)) :: lst
             in
             (* Note that [add_chars] adds characters in "forward" order - i.e., a-c is
-             * added as [Character a; Character b; Character c]. This is important 
-             * because in all other cases, we add them in reverse order as we 
+             * added as [Character a; Character b; Character c]. This is important
+             * because in all other cases, we add them in reverse order as we
              * progress through the input string. How the expressions are ordereed
-             * matters in an And list, since we need to output a string that matches 
+             * matters in an And list, since we need to output a string that matches
              * the ordering of the input regex. However, in this case it doesn't make
              * a difference, since the output is an Or expression. *)
             let new_expr = Or (add_chars init diff tl1) in
